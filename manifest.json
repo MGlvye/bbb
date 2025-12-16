@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "华为云 IoTDA 中控台",
+  "version": "1.0",
+  "description": "纯前端零跨域，安全访问华为云",
+  "permissions": ["storage"],
+  "host_permissions": ["*://*.myhuaweicloud.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "打开中控台"
+  },
+  "icons": {
+    "128": "https://api.dicebear.com/9.x/bottts-neutral/svg?seed=iotda"
+  }
+}

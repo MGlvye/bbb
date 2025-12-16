@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>华为云 IoTDA 一键调用工具</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: linear-gradient(135deg, #acb8eb, #B0E0E6);
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #333;
+        }
+
+        #loginPage {
+            background: white;
+            padding: 40px 50px;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3);
+            text-align: center;
+            width: 380px;
+            max-width: 90%;
+        }
+
+        #loginPage h1 {
+            margin: 0 0 30px;
+            color: #2c3e50;
+            font-size: 28px;
+        }
+
+        #loginPage input {
+            width: 100%;
+            padding: 14px;
+            margin: 12px 0;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        #loginPage input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+        }
+
+        #loginPage button {
+            width: 100%;
+            padding: 14px;
+            margin-top: 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        #loginPage button:hover {
+            background: #5a6fd8;
+        }
+
+        #loginPage .error {
+            color: #e74c3c;
+            margin-top: 10px;
+            font-size: 14px;
+            min-height: 20px;
+        }
+
+        #mainConsole {
+            display: none;
+            width: 100%;
+            max-width: 1400px;
+            background: #f4f4f4;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        #mainConsole button {
+            padding: 12px 20px;
+            margin: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        #mainConsole #log {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff;
+            border: 1px solid #ddd;
+            white-space: pre-wrap;
+            word-break: break-all;
+            border-radius: 8px;
+            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        #mainConsole #devicePanel {
+            margin: 20px 0;
+            padding: 20px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            border: 1px solid #eee;
+        }
+
+        .button-bar {
+            position: sticky;
+            top: 0;
+            background: #f4f4f4;
+            padding: 10px 0;
+            z-index: 100;
+            border-bottom: 2px solid #ddd;
+            margin-bottom: 20px;
+            border-radius: 12px 12px 0 0;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- 登录页面 -->
+    <div id="loginPage">
+        <h1>华为云 IoTDA 控制台</h1>
+        <input type="text" id="username" placeholder="IAM 用户名" autocomplete="username">
+        <input type="password" id="password" placeholder="密码" autocomplete="current-password">
+        <div class="error" id="errorMsg"></div>
+        <button onclick="login()">登录</button>
+    </div>
+    <!-- 主控制台 -->
+    <div id="mainConsole">
+        <div class="button-bar">
+            <h1>华为云 IoTDA 本地控制台</h1>
+            <button onclick="step1_getToken()">1. 获取 Token</button>
+            <button onclick="step2_getProject()">2. 获取 Project ID</button>
+            <button onclick="step3_getDevices()">3. 获取设备列表</button>
+            <button onclick="step4_getDeviceShadow()">4. 获取设备状态</button>
+            <button onclick="runall()">一键获取全部</button>
+            <button onclick="clearLog()">清空日志</button>
+        </div>
+
+        <!-- 设备状态图形展示区-->
+        <div id="devicePanel"
+            style="margin: 20px 0; padding: 20px; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+            <h2 style="margin-top: 0; color: #2c3e50;">设备实时状态</h2>
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; justify-content: center;">
+
+            </div>
+            <div id="noDevice" style="text-align: center; color: #999; font-size: 18px; padding: 40px;">
+                未检测到设备
+            </div>
+        </div>
+
+        <div id="log">日志输出区：</div>
+
+        <script>
+            // 全局变量
+            let token = '';
+            let projectID = '';
+            const endpoint = '132ba64707.st1.iotda-app.cn-south-1.myhuaweicloud.com';
+            const LOG_KEY = 'iotda-local-log';
+            let currentDeviceStatus = {};
+            let username = '';
+            let password = '';
+            let counter = 0;
+
+
+            // 登录函数
+            function login() {
+                username = document.getElementById('username').value.trim();
+                password = document.getElementById('password').value;
+
+                if (!username || !password) {
+                    document.getElementById('errorMsg').textContent = '请输入账号和密码';
+                    return;
+                }
+
+                // 隐藏登录页，显示主界面
+                document.getElementById('loginPage').style.display = 'none';
+                document.getElementById('mainConsole').style.display = 'block';
+
+                log('登录成功，用户：' + username);
+
+            }
+
+            // 支持 Enter 键登录
+            document.getElementById('password').addEventListener('keypress', function (e) {
+                if (e.key === 'Enter') login();
+            });
+
+            function log(msg) {
+                const div = document.getElementById('log');
+                const timestamp = new Date().toLocaleTimeString();
+                const line = `${timestamp} → ${msg}`;
+                div.innerHTML += '<br>' + line;
+                div.scrollTop = div.scrollHeight;
+                let history = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+                history.push(line);
+                localStorage.setItem(LOG_KEY, JSON.stringify(history));
+            }
+
+            function clearLog() {
+                document.getElementById('log').innerHTML = '日志输出区：';
+                localStorage.removeItem(LOG_KEY);
+                currentDeviceStatus = {};
+                localStorage.removeItem('deviceStatusCache');  // 清空缓存
+
+                // 重新渲染面板
+                updateDevicePanel();
+
+                log('日志和设备状态已清空');
+            }
+
+            window.addEventListener('load', () => {
+                const cached = localStorage.getItem('deviceStatusCache');
+                if (cached) {
+                    currentDeviceStatus = JSON.parse(cached);
+                    updateDevicePanel();
+                    log('从缓存恢复设备状态');
+                }
+                const history = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+                const div = document.getElementById('log');
+                div.innerHTML = '日志输出区：';
+                history.forEach(line => div.innerHTML += '<br>' + line);
+                div.scrollTop = div.scrollHeight;
+            });
+
+            async function step1_getToken() {
+                if (!username || !password) {
+                    alert('请先登录！');
+                    return;
+                }
+
+                try {
+                    const resp = await fetch('http://localhost:8000/v3/auth/tokens?nocatalog=true', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json;charset=UTF-8' },
+                        body: JSON.stringify({
+                            auth: {
+                                identity: {
+                                    methods: ["password"],
+                                    password: {
+                                        user: {
+                                            domain: { name: "hid_p6tqkqd64uyggab" },
+                                            name: username,
+                                            password: password
+                                        }
+                                    }
+                                },
+                                scope: { project: { name: "cn-north-1" } }
+                            }
+                        })
+                    });
+
+                    if (!resp.ok) throw new Error('登录失败，请检查账号密码');
+                    token = resp.headers.get('X-Subject-Token');
+                    log('Token 获取成功！长度：' + token.length);
+                    alert('第1步完成！Token 已获取');
+                } catch (e) {
+                    log('获取 Token 失败：' + e.message);
+                    alert('获取 Token 失败：' + e.message);
+                    document.getElementById('mainConsole').style.display = 'none';
+                    document.getElementById('loginPage').style.display = 'block';
+                }
+            }
+
+            // 2. 获取 Project ID
+            async function step2_getProject() {
+                if (!token) return alert('请先执行第1步获取 Token！');
+                try {
+                    const resp = await fetch('http://localhost:8000/v3/auth/projects', {
+                        method: 'GET',
+                        headers: { 'X-Auth-Token': token }
+                    });
+
+                    const data = await resp.json();
+                    if (!data.projects || data.projects.length === 0) throw new Error('未找到项目');
+                    projectID = data.projects[0].id;
+                    log('Project ID 获取成功：' + projectID);
+                    alert('第2步完成！Project ID = ' + projectID);
+                } catch (e) {
+                    log('获取 Project 失败：' + e.message);
+                    alert('获取 Project 失败：' + e.message);
+                }
+            }
+
+            // 3. 获取设备列表
+            async function step3_getDevices() {
+                if (!token || !projectID) return alert('请先完成前两步！');
+                try {
+                    const url = `https://${endpoint}/v5/iot/${projectID}/devices`;
+                    const resp = await fetch('http://localhost:8000/proxy-iotda', {
+                        method: 'GET',
+                        headers: {
+                            'X-Auth-Token': token,
+                            'Target-Url': url
+                        }
+                    });
+
+                    const data = await resp.json();
+                    const count = data.devices ? data.devices.length : 0;
+                    log(`设备列表获取成功，共 ${count} 台设备`);
+                    log('完整返回：\n' + JSON.stringify(data, null, 2));
+                    alert(`第3步完成！共找到 ${count} 台设备`);
+                } catch (e) {
+                    log('获取设备失败：' + e.message);
+                    alert('获取设备失败：' + e.message);
+                }
+            }
+
+            // 4. 获取设备状态
+            async function step4_getDeviceShadow() {
+                if (!token || !projectID) return alert('请先完成前两步！');
+                const deviceId = prompt('请输入要查询的设备ID', 'IoTDev01')?.trim();
+                if (!deviceId) return;
+
+                try {
+                    // 查询设备详情
+                    const deviceUrl = `https://${endpoint}/v5/iot/${projectID}/devices/${deviceId}`;
+                    const deviceResp = await fetch('http://localhost:8000/proxy-iotda', {
+                        method: 'GET',
+                        headers: { 'X-Auth-Token': token, 'Target-Url': deviceUrl }
+                    });
+                    if (!deviceResp.ok) throw new Error(`设备详情失败: ${deviceResp.status}`);
+                    const deviceData = await deviceResp.json();
+                    const isOnline = deviceData.status === 'ONLINE';
+
+                    // 查询影子
+                    const shadowUrl = `https://${endpoint}/v5/iot/${projectID}/devices/${deviceId}/shadow`;
+                    const shadowResp = await fetch('http://localhost:8000/proxy-iotda', {
+                        method: 'GET',
+                        headers: { 'X-Auth-Token': token, 'Target-Url': shadowUrl }
+                    });
+                    if (!shadowResp.ok) throw new Error(`影子查询失败: ${shadowResp.status}`);
+                    const shadowData = await shadowResp.json();
+
+                    const shadow = shadowData.shadow || [];
+                    let allReported = {};
+                    let latestTime = '未知时间';
+                    shadow.forEach(s => {
+                        if (s.reported?.properties) Object.assign(allReported, s.reported.properties);
+                        if (s.reported?.event_time && latestTime === '未知时间') {
+                            const utcTime = s.reported.event_time.replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/, '$1-$2-$3T$4:$5:$6Z');
+                            latestTime = new Date(utcTime).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+                        }
+                    });
+
+                    const temp = allReported.temperature ?? '--';
+                    const hum = allReported.humidity ?? '--';
+
+                    currentDeviceStatus[deviceId] = {
+                        online: isOnline,
+                        temp: temp,
+                        hum: hum,
+                        fan: 'on',    // 本地默认开
+                        light: 'on',  // 本地默认开
+                        time: latestTime
+                    };
+                    localStorage.setItem('deviceStatusCache', JSON.stringify(currentDeviceStatus));
+                    updateDevicePanel();
+                    log(`设备 ${deviceId} 状态更新成功`);
+                } catch (e) {
+                    log('获取状态失败：' + e.message);
+                    alert('获取失败：' + e.message);
+                }
+            }
+
+            // 用于刷新单个设备
+            async function refreshDevice(deviceId) {
+                try {
+                    const deviceUrl = `https://${endpoint}/v5/iot/${projectID}/devices/${deviceId}`;
+                    const deviceResp = await fetch('http://localhost:8000/proxy-iotda', {
+                        method: 'GET',
+                        headers: { 'X-Auth-Token': token, 'Target-Url': deviceUrl }
+                    });
+                    if (!deviceResp.ok) return;
+                    const deviceData = await deviceResp.json();
+                    const isOnline = deviceData.status === 'ONLINE';
+
+                    const shadowUrl = `https://${endpoint}/v5/iot/${projectID}/devices/${deviceId}/shadow`;
+                    const shadowResp = await fetch('http://localhost:8000/proxy-iotda', {
+                        method: 'GET',
+                        headers: { 'X-Auth-Token': token, 'Target-Url': shadowUrl }
+                    });
+                    if (!shadowResp.ok) return;
+                    const shadowData = await shadowResp.json();
+
+                    const shadow = shadowData.shadow || [];
+                    let allReported = {};
+                    let latestTime = '未知时间';
+                    shadow.forEach(s => {
+                        if (s.reported?.properties) Object.assign(allReported, s.reported.properties);
+                        if (s.reported?.event_time && latestTime === '未知时间') {
+                            const utcTime = s.reported.event_time.replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/, '$1-$2-$3T$4:$5:$6Z');
+                            latestTime = new Date(utcTime).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+                        }
+                    });
+
+                    const temp = allReported.temperature ?? '--';
+                    const hum = allReported.humidity ?? '--';
+
+                    currentDeviceStatus[deviceId] = {
+                        ...currentDeviceStatus[deviceId],
+                        online: isOnline,
+                        temp: temp,
+                        hum: hum,
+                        time: latestTime
+                    };
+
+                    updateDevicePanel();
+                } catch (e) {
+                    log('刷新失败：' + e.message);
+                }
+            }
+
+            // 命令下发
+            async function sendCommand(deviceId, cmdName, onOffStr) {
+                if (!token || !projectID) {
+                    alert('请先获取 Token 和 Project ID！');
+                    return;
+                }
+
+                const url = `https://${endpoint}/v5/iot/${projectID}/devices/${deviceId}/commands`;
+
+                const payload = {
+                    service_id: "IoTService",
+                    command_name: cmdName,
+                    paras: { "OnOff": onOffStr }
+                };
+
+                try {
+                    const resp = await fetch('http://localhost:8000/proxy-iotda', {
+                        method: 'POST',
+                        headers: {
+                            'X-Auth-Token': token,
+                            'Target-Url': url,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!resp.ok) {
+                        const err = await resp.text();
+                        throw new Error(`HTTP ${resp.status}:${err}`);
+                    }
+
+                    const data = await resp.json();
+                    log(`命令下发成功：${deviceId}${cmdName} OnOff=${onOffStr}`);
+                } catch (e) {
+                    log('命令下发失败：' + e.message);
+                    alert('下发失败：' + e.message);
+                }
+            }
+
+            async function runall() {
+                const originalAlert = window.alert;
+                window.alert = () => { };
+                try {
+                    log('开始一键执行....');
+                    await step1_getToken();
+                    await step2_getProject();
+                    await step3_getDevices();
+                    await step4_getDeviceShadow();
+                    log('全部执行完毕!');
+                } catch (e) {
+                    alert('出错了：' + e.message);
+                } finally {
+                    window.alert = originalAlert;
+                }
+            }
+        </script>
+
+        <script>
+            function updateDevicePanel() {
+                const container = document.querySelector('#devicePanel > div');
+                const noDevice = document.getElementById('noDevice');
+
+                if (Object.keys(currentDeviceStatus).length === 0) {
+                    container.innerHTML = '';
+                    noDevice.style.display = 'block';
+                    return;
+                }
+
+                noDevice.style.display = 'none';
+                container.innerHTML = '';
+                container.style.cssText = `
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+                gap: 24px;
+                max-width: 1400px;
+                margin: 0 auto;
+                padding: 20px;
+                background: #B0E0E6;
+                border-radius: 20px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+            `;
+
+                Object.keys(currentDeviceStatus).forEach(deviceId => {
+                    const s = currentDeviceStatus[deviceId];
+                    let seed = deviceId;
+
+                    const card = document.createElement('div');
+                    card.style.cssText = `
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+                    overflow: hidden;
+                    transition: all 0.3s ease;
+                    border: 1px solid #B0E0E6;
+                `;
+                    card.onmouseover = () => card.style.transform = 'translateY(-8px)';
+                    card.onmouseout = () => card.style.transform = 'translateY(0)';
+
+                    const styles = ['lorelei', 'avataaars', 'bottts-neutral', 'pixel-art', 'thumbs', 'identicon', 'micah', 'open-peeps', 'adventurer'];
+                    const styleIndex = deviceId.split('').reduce((a, b) => a + b.charCodeAt(0), 0) % styles.length;
+                    const style = styles[styleIndex];
+
+                    card.innerHTML = `
+                    <div style="display: flex; align-items: center; padding: 20px; gap: 25px;">
+                        <div>
+                            <img src="https://api.dicebear.com/9.x/${style}/svg?seed=${seed}&size=256&backgroundColor=1e293b&color=60a5fa"
+                                 style="width: 120px; height: 120px; border-radius: 16px; object-fit: cover; border: 4px solid #f0f0f0;">
+                        </div>
+                       
+                        <div style="flex: 1; color: #2c3e50;">
+                            <h3 style="margin: 0 0 12px; font-size: 22px;">
+                                ${deviceId}
+                                <span style="margin-left: 10px; font-size: 16px; color: ${s.online ? '#4CAF50' : '#f44336'}; font-weight: bold;">
+                                    ${s.online ? '● 在线' : '○ 离线'}
+                                </span>
+                            </h3>
+
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                                <div style="text-align: center; padding: 18px; background: #ffebee; border-radius: 16px;">
+                                    <div style="font-size: 36px; font-weight: bold; color: #e74c3c;">${s.temp}℃</div>
+                                    <div style="margin-top: 8px; color: #666; font-size: 16px;">温度</div>
+                                </div>
+                                <div style="text-align: center; padding: 18px; background: #e3f2fd; border-radius: 16px;">
+                                    <div style="font-size: 36px; font-weight: bold; color: #3498db;">${s.hum}<small style="font-size: 20px;">%</small></div>
+                                    <div style="margin-top: 8px; color: #666; font-size: 16px;">湿度</div>
+                                </div>
+                            </div>
+
+                            <!-- 风扇 + 灯控制 -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px;">
+                                <div style="text-align: center; padding: 18px; background: {s.fan === 'on' ? '#e8f5e9' : '#fff3e0'}; border-radius: 16px; border: 2px solid${s.fan === 'on' ? '#4caf50' : '#ff9800'};">
+                                    <div style="font-size: 28px; margin-bottom: 12px; font-weight: bold;">风扇</div>
+                                    <button onclick="
+                                        const newState = '${s.fan}' === 'on' ? 'off' : 'on';
+                                        const onOffStr = newState === 'on' ? 'true' : 'false';
+                                        currentDeviceStatus['${deviceId}'].fan = newState;
+                                        sendCommand('${deviceId}', 'fan', onOffStr);
+                                        updateDevicePanel();
+                                    "
+                                    style="padding: 12px 24px; font-size: 18px; font-weight: bold; background: ${s.fan === 'on' ? '#4caf50' : '#ff9800'}; color: white; border: none; border-radius: 12px; cursor: pointer;">
+                                        ${s.fan === 'on' ? '关闭风扇' : '打开风扇'}
+                                    </button>
+                                </div>
+
+                                <div style="text-align: center; padding: 18px; background: ${s.light === 'on' ? '#fff8e1' : '#eceff1'}; border-radius: 16px; border: 2px solid${s.light === 'on' ? '#ffc107' : '#607d8b'};">
+                                    <div style="font-size: 28px; margin-bottom: 12px; font-weight: bold;">灯</div>
+                                    <button onclick="
+                                        const newState = '${s.light}' === 'on' ? 'off' : 'on';
+                                        const onOffStr = newState === 'on' ? 'true' : 'false';
+                                        currentDeviceStatus['${deviceId}'].light = newState;
+                                        sendCommand('${deviceId}', 'lightLed', onOffStr);
+                                        updateDevicePanel();
+                                    "
+                                    style="padding: 12px 24px; font-size: 18px; font-weight: bold; background: ${s.light === 'on' ? '#ffc107' : '#607d8b'}; color: white; border: none; border-radius: 12px; cursor: pointer;">
+                                        ${s.light === 'on' ? '关闭灯' : '打开灯'}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 16px; font-size: 14px; color: #888;">
+                                上次更新：${s.time}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                    container.appendChild(card);
+                });
+            }
+        </script>
+</body>
+
+</html>
